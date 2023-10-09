@@ -1,2 +1,8 @@
-gymnasium
-tqdm
+cloudpickle==2.2.1
+Farama-Notifications==0.0.4
+gymnasium==0.29.1
+numpy==1.26.0
+opencv-python==4.8.1.78
+pygame==2.5.2
+tqdm==4.66.1
+typing_extensions==4.8.0
