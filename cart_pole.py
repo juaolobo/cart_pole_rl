@@ -13,9 +13,7 @@ class CartPoleAgent:
 		epsilon=0.15,
 		gamma=0.9,
 		lr=0.05,
-		discretization_factor=100000,
-		max_steps=1000,
-		max_episodes=1000000,
+		discretization_factor=100,
 		render_episode=-1
 	):
 		self.env = gym.make("CartPole-v1", render_mode="rgb_array")
@@ -24,14 +22,12 @@ class CartPoleAgent:
 		self.epsilon = epsilon
 		self.gamma = gamma
 		self.lr = lr
-		self.max_steps = max_steps
-		self.max_episodes = max_episodes
 		self.render_episode = render_episode
 
 	def _discretize(self):
 		
 		unit = self.env.observation_space.high/self.d_factor
-		# manually set velocity and angular velocity unit (max position ~ 10*[max angle] -> max velocity ~ 10*[max velocity])
+		# manually set velocity and angular velocity unit (max position ~ 10*[max angle] -> max velocity ~ 10*[max ang velocity])
 		velocity_unit = 1000/self.d_factor
 		ang_velocity_unit = velocity_unit/10
 
@@ -51,7 +47,7 @@ class CartPoleAgent:
 	def render(self, episode):
 
 		if self.render_episode >= 0 and episode % self.render_episode == 0:
-			print(len(self.Q))
+
 			img = cv2.cvtColor(self.env.render(), cv2.COLOR_RGB2BGR)
 			cv2.imshow("CartPole-v1", img)
 			cv2.waitKey(50)
@@ -59,10 +55,7 @@ class CartPoleAgent:
 	def choose_action(self, state, on_policy=True):
 
 		if state not in self.Q:
-			self.Q[state] = np.random.rand(2)
-
-		else:
-			print("Já vi.")
+			self.Q[state] = (np.random.rand(2) * 2) - 1
 
 		q = self.Q[state]
 
@@ -76,14 +69,14 @@ class CartPoleAgent:
 
 		return action
 
-	def sarsa(self):
+	def sarsa(self, max_episodes, max_steps):
 
-		for episode in tqdm.tqdm(range(self.max_episodes)):
+		for episode in tqdm.tqdm(range(max_episodes)):
 			state, _ = self.env.reset()
 			state = self.discretize(state)
 			action = self.choose_action(state, on_policy=True)
 
-			for _ in range(self.max_steps):
+			for _ in range(max_steps):
 				_state, reward, terminated, truncated, info = self.env.step(action)
 
 				if terminated or truncated:
@@ -99,13 +92,13 @@ class CartPoleAgent:
 				state = _state
 				action = _action
 
-	def q_learning(self):
+	def q_learning(self, max_episodes, max_steps):
 
-		for episode in tqdm.tqdm(range(self.max_episodes)):
+		for episode in tqdm.tqdm(range(max_episodes)):
 			state, _ = self.env.reset()
 			state = self.discretize(state)
 
-			for _ in range(self.max_steps):
+			for _ in range(max_steps):
 				action = self.choose_action(state, on_policy=True)
 				_state, reward, terminated, truncated, info = self.env.step(action)
 
@@ -115,15 +108,31 @@ class CartPoleAgent:
 				self.render(episode)
 
 				_state = self.discretize(_state)
+				max_action = self.choose_action(_state, on_policy=False)
+				max_q_action = self.Q[_state][max_action]
 
 				q = self.Q[state][action]
-				max_q_action = self.choose_action(action, on_policy=False)
 				self.Q[state][action] = q + self.lr*(reward + self.gamma*max_q_action - q)
 				state = _state
 
+	def simulate_episode(self, steps):
+
+		state, _ = self.env.reset()
+		state = self.discretize(state)
+
+		for _ in range(steps):
+			action = self.choose_action(state, on_policy=True)
+			_state, reward, terminated, truncated, info = self.env.step(action)
+			state = self.discretize(_state)
+			self.render(0)
+
+
+
 def main():
-	agent = CartPoleAgent(render_episode=10000)
-	agent.sarsa()
+	agent = CartPoleAgent(epsilon=0.25, render_episode=10000)
+	# agent.sarsa(max_episodes=1000000, max_steps=500)
+	agent.q_learning(max_episodes=1000000, max_steps=500)
+	agent.simulate_episode()
 
 if __name__ == "__main__":
 	main()
