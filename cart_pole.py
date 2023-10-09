@@ -7,7 +7,7 @@ np.random.seed(seed)
 
 class CartPoleAgent:
 
-	def __init__(self, discretization_factor, max_steps=100, max_episodes=10000):
+	def __init__(self, discretization_factor=100000, max_steps=100, max_episodes=10000):
 		self.env = gym.make("CartPole-v1")
 		self.n_states = discretization_factor
 		self.Q, self.unit = self._discretize()
@@ -64,16 +64,17 @@ class CartPoleAgent:
 
 		for episode in range(self.max_episodes):		
 			state, _ = self.env.reset()
-			action = self.choose_action(state)
 
-			for _ in self.max_steps:
+			for _ in range(self.max_steps):
+				action = self.choose_action(state)
 				_state, reward, terminated, truncated, info = env.step(action)
 				q = self.Q[state][action]
-				self.Q[state][action] = q + self.lr*(reward + self.gamma*np.argmax(self.Q[_state]) - q)
+				max_q_action = np.argmax(self.Q[_state])
+				self.Q[state][action] = q + self.lr*(reward + self.gamma*max_q_action - q)
 				state = _state
 
 def main():
-	agent = CartPoleAgent(100000)
+	agent = CartPoleAgent()
 	agent.sarsa()
 	breakpoint()
 
