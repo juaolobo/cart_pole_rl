@@ -5,6 +5,9 @@ import cv2
 
 import tqdm
 import matplotlib.pyplot as plt
+import argparse
+
+import sys
 
 seed = 11
 np.random.seed(seed)
@@ -15,36 +18,46 @@ class CartPoleAgent:
 		self,
 		epsilon=0.25,
 		gamma=0.9,
-		lr=0.1,
-		discretization_factor=100,
+		learning_rate=0.2,
 		render_episode=-1
 	):
 		self.env = gym.make("CartPole-v1", render_mode="rgb_array")
-		self.d_factor = discretization_factor
+		self.obs_discretization = (6, 6, 12, 12)
 		self.Q, self.unit = self._discretize()
 		self.epsilon = epsilon
 		self.gamma = gamma
-		self.lr = lr
+		self.lr = learning_rate
 		self.render_episode = render_episode
 		self.reward_history = {"q_learning": [], "sarsa": []}
 
 	def _discretize(self):
-		
-		unit = self.env.observation_space.high/self.d_factor
-		# manually set velocity and angular velocity unit (max position ~ 10*[max angle] -> max velocity ~ 10*[max ang velocity])
-		velocity_unit = 1000/self.d_factor
-		ang_velocity_unit = velocity_unit/10
 
-		unit[1] = velocity_unit
-		unit[3] = ang_velocity_unit
-		Q = {}
+		state_dim = np.array(self.obs_discretization) + 1
+		q_space_dims = (*state_dim, ) + (self.env.action_space.n,)
+
+		Q = np.zeros(q_space_dims)
+		unit = np.array([2.4, 3, 0.2095, 1])
+
+		unit = 2*unit/self.obs_discretization
 
 		return Q, unit
 
+	def fix_state(self, state):
+
+		state[1] = 3 if state[1] > 3 else state[1]
+		state[1] = -3 if state[1] < -3 else state[1]
+
+		state[3] = 1 if state[3] > 1 else state[3]
+		state[3] = -1 if state[3] < -1 else state[3]
+
+		return state		
+
 	def discretize(self, state):
 
+		state = self.fix_state(state)
+
 		# np.fix == np.floor towards zero
-		discrete_state = np.fix(state/(self.unit))
+		discrete_state = np.floor(state/(self.unit)) + np.array(self.obs_discretization)/2
 
 		return tuple(discrete_state.astype(int))
 
@@ -54,35 +67,28 @@ class CartPoleAgent:
 
 			img = cv2.cvtColor(self.env.render(), cv2.COLOR_RGB2BGR)
 			cv2.imshow("CartPole-v1", img)
-			cv2.waitKey(50)
+			cv2.waitKey(20)
 
-	def choose_action(self, state, on_policy=True):
-
-		if state not in self.Q:
-			self.Q[state] = [0,0]
-			#self.Q[state] = (np.random.rand(2) * 2) - 1
+	def choose_action(self, state):
 
 		q = self.Q[state]
 
-		if on_policy:
-			action = self.env.action_space.sample() \
-						if np.random.uniform(0, 1) < self.epsilon \
-						else np.argmax(q)
-
-		else:
-			action = np.argmax(q)
+		action = self.env.action_space.sample() \
+					if np.random.uniform(0, 1) < self.epsilon \
+					else np.argmax(q)
 
 		return action
 
 	def sarsa(self, max_episodes, max_steps):
 
 		for episode in tqdm.tqdm(range(max_episodes)):
+
 			state, _ = self.env.reset()
 			state = self.discretize(state)
-			action = self.choose_action(state, on_policy=True)
 
 			reward_per_ep = 0
 			for _ in range(max_steps):
+				action = self.choose_action(state)
 				_state, reward, terminated, truncated, info = self.env.step(action)
 				reward_per_ep += reward
 
@@ -92,7 +98,7 @@ class CartPoleAgent:
 				self.render(episode)
 
 				_state = self.discretize(_state)
-				_action = self.choose_action(_state, on_policy=True)
+				_action = self.choose_action(_state)
 
 				q = self.Q[state][action]
 				self.Q[state][action] = q + self.lr*(reward + self.gamma*self.Q[_state][_action] - q)
@@ -109,8 +115,10 @@ class CartPoleAgent:
 
 			reward_per_ep = 0
 			for _ in range(max_steps):
-				action = self.choose_action(state, on_policy=True)
+
+				action = self.choose_action(state)
 				_state, reward, terminated, truncated, info = self.env.step(action)
+
 				reward_per_ep += reward
 
 				if terminated or truncated:
@@ -119,14 +127,33 @@ class CartPoleAgent:
 				self.render(episode)
 
 				_state = self.discretize(_state)
-				max_action = self.choose_action(_state, on_policy=False)
-				max_q_action = self.Q[_state][max_action]
+				max_q_action = np.max(self.Q[_state])
 
 				q = self.Q[state][action]
 				self.Q[state][action] = q + self.lr*(reward + self.gamma*max_q_action - q)
+								
 				state = _state
 
-			self.reward_history["q_learning"].append(reward_per_ep)
+			if episode % 100 == 0:
+				self.reward_history["q_learning"].append(self.trial_run())
+
+	def trial_run(self):
+
+		total_reward = 0
+		state, _ = self.env.reset()
+		while True:
+			state = self.discretize(state)
+			action = np.argmax(self.Q[state])
+			_state, reward, terminated, truncated, info = self.env.step(action)
+
+			total_reward += reward
+
+			if terminated or truncated:
+				break
+
+			state = _state
+
+		return total_reward
 
 	def simulate_episode(self, steps):
 
@@ -135,7 +162,7 @@ class CartPoleAgent:
 
 		while True:
 			state = self.discretize(state)
-			action = self.choose_action(state, on_policy=True)
+			action = np.argmax(self.Q[state])
 			_state, reward, terminated, truncated, info = self.env.step(action)
 
 			if terminated or truncated:
@@ -150,20 +177,44 @@ class CartPoleAgent:
 		colors = {"q_learning": "blue", "sarsa": "red"}
 
 		for algo, rewards in self.reward_history.items():
+			fig = plt.figure()
 			plt.plot(range(len(rewards)), rewards, label=labels[algo], color=colors[algo])
+			plt.legend()
+			fig.savefig(filename.replace(".png", f"_{algo}.png"))
+			plt.close()
 
-		plt.legend()
-		# plt.savefig(filename)
-		plt.show()
+def parse_params():
+
+	parser = argparse.ArgumentParser(description='Agent parameters')
+
+	parser.add_argument('-lr', '--learning_rate', type=float, nargs=1,
+                    help='Taxa de aprendizado')
+
+	parser.add_argument('-e', '--epsilon', type=float, nargs=1,
+                    help='Taxa de exploração')
+
+	parser.add_argument('-g', '--gamma', type=float, nargs=1,
+                    help='Desconto da recompensa')
+
+	return parser.parse_args()
 
 
 def main():
-	agent = CartPoleAgent(epsilon=0.25)
+
+	if len(sys.argv) > 1:
+		kwargs = dict(map(lambda x : (x[0], *x[1]) if x[1] != None else x, parse_params()._get_kwargs()))
+		agent = CartPoleAgent(**kwargs)
+		output_file = f'plots/lr_{kwargs["learning_rate"]}_eps_{kwargs["epsilon"]}_gamma_{kwargs["gamma"]}.png'
+
+	else:
+		agent = CartPoleAgent()
+		output_file = f'plots/default.png'
+
 	# agent.sarsa(max_episodes=50000, max_steps=500)
-	agent.q_learning(max_episodes=10000, max_steps=500)
-	agent.save_plot('teste.png')
-	breakpoint()
-	# agent.simulate_episode(10000)
+	agent.q_learning(max_episodes=300000, max_steps=500)
+
+	agent.simulate_episode(1000)
+	agent.save_plot(output_file)
 
 if __name__ == "__main__":
 	main()
